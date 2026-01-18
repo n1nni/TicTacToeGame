@@ -237,20 +237,29 @@
             var html = '<div class="list-group">';
             games.forEach(function (g) {
                 var isCreator = g.hostPlayer === currentPlayer;
+                var isParticipant = g.hostPlayer === currentPlayer || g.guestPlayer === currentPlayer;
 
                 html += '<div class="list-group-item d-flex justify-content-between align-items-center">'
                     + '<div>'
                     + '<div class="fw-semibold"></div>'
-                    + '<small class="text-muted game-id"></small>'
-                    + (isCreator ? '<small class="text-success d-block">You created this game</small>' : '')
-                    + '</div>'
-                    + '<div class="btn-group">';
+                    + '<small class="text-muted game-id"></small>';
 
                 if (isCreator) {
+                    html += '<small class="text-success d-block">You created this game</small>';
+                } else if (isParticipant) {
+                    html += '<small class="text-info d-block">You are playing in this game</small>';
+                }
+
+                html += '</div><div class="btn-group">';
+
+                if (isParticipant) {
                     html += '<button type="button" class="btn btn-sm btn-outline-success js-rejoin-game" '
-                        + 'data-game-id="" ' + (hasName ? '' : 'disabled') + '>Rejoin</button>'
-                        + '<button type="button" class="btn btn-sm btn-outline-danger js-cancel-game" '
-                        + 'data-game-id="" ' + (hasName ? '' : 'disabled') + '>Cancel</button>';
+                        + 'data-game-id="" ' + (hasName ? '' : 'disabled') + '>Rejoin</button>';
+
+                    if (isCreator && g.status === 'WaitingForOpponent') {
+                        html += '<button type="button" class="btn btn-sm btn-outline-danger js-cancel-game" '
+                            + 'data-game-id="" ' + (hasName ? '' : 'disabled') + '>Cancel</button>';
+                    }
                 } else {
                     html += '<button type="button" class="btn btn-sm btn-outline-primary js-join-game" '
                         + 'data-game-id="" ' + (hasName ? '' : 'disabled') + '>Join</button>';
@@ -407,6 +416,8 @@
         state: null,
         cellButtons: null,
         redirectTimeout: null,
+        countdownInterval: null,
+        redirectSeconds: 10,
 
         init: async function () {
             if (!window.ticTacToeGame || !document.getElementById('board')) return;
@@ -422,11 +433,34 @@
             var isGuest = displayName === gameData.guestPlayer;
 
             // Determine player mark (host = X, guest = O)
-            var playerMark = isHost ? 'X' : (isGuest ? 'O' : '?');
+            var playerMark = '?';
+            var playerMarkText = '?';
 
-            // Update UI with player mark
+            if (isHost) {
+                playerMark = 'X';
+                playerMarkText = 'X (Host)';
+            } else if (isGuest) {
+                playerMark = 'O';
+                playerMarkText = 'O (Guest)';
+            } else {
+                playerMarkText = 'Observer';
+            }
+
+            // Update UI with player mark immediately
             var markEl = document.getElementById('playerMarkDisplay');
-            if (markEl) markEl.textContent = playerMark;
+            if (markEl) {
+                markEl.textContent = playerMarkText;
+
+                // Add color class
+                markEl.classList.remove('text-primary', 'text-danger', 'text-muted');
+                if (playerMark === 'X') {
+                    markEl.classList.add('text-primary');
+                } else if (playerMark === 'O') {
+                    markEl.classList.add('text-danger');
+                } else {
+                    markEl.classList.add('text-muted');
+                }
+            }
 
             this.state = {
                 gameId: gameData.gameId,
@@ -544,18 +578,22 @@
             }
 
             if (state.status === 'Finished') {
+                var baseMessage = '';
                 if (state.winnerPlayerId) {
                     if (state.winnerPlayerId === state.playerId) {
-                        UI.setAlertText('gameStatus', 'You won! Redirecting to lobby in 10 seconds...');
+                        baseMessage = 'You won!';
                         if (statusEl) statusEl.classList.add('alert-success');
                     } else {
-                        UI.setAlertText('gameStatus', 'You lost. Redirecting to lobby in 10 seconds...');
+                        baseMessage = 'You lost.';
                         if (statusEl) statusEl.classList.add('alert-danger');
                     }
                 } else {
-                    UI.setAlertText('gameStatus', 'Draw. Redirecting to lobby in 10 seconds...');
+                    baseMessage = 'Draw.';
                     if (statusEl) statusEl.classList.add('alert-info');
                 }
+
+                // Will be updated by countdown
+                UI.setAlertText('gameStatus', baseMessage + ' Redirecting to lobby in ' + this.redirectSeconds + ' seconds...');
                 return;
             }
 
@@ -569,9 +607,37 @@
 
         scheduleRedirect: function () {
             var self = this;
-            this.redirectTimeout = setTimeout(function () {
+            self.redirectSeconds = 10;
+
+            // Update countdown every second
+            self.countdownInterval = setInterval(function () {
+                self.redirectSeconds--;
+
+                if (self.redirectSeconds <= 0) {
+                    clearInterval(self.countdownInterval);
+                    return;
+                }
+
+                // Update status text with new countdown
+                var baseMessage = '';
+                if (self.state.winnerPlayerId) {
+                    if (self.state.winnerPlayerId === self.state.playerId) {
+                        baseMessage = 'You won!';
+                    } else {
+                        baseMessage = 'You lost.';
+                    }
+                } else {
+                    baseMessage = 'Draw.';
+                }
+
+                UI.setAlertText('gameStatus', baseMessage + ' Redirecting to lobby in ' + self.redirectSeconds + ' seconds...');
+            }, 1000);
+
+            // Actual redirect after 10 seconds
+            self.redirectTimeout = setTimeout(function () {
+                clearInterval(self.countdownInterval);
                 window.location.href = '/';
-            }, 10000); // 10 seconds
+            }, 10000);
         }
     };
 

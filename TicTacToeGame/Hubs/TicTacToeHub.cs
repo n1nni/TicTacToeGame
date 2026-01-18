@@ -132,7 +132,9 @@ public sealed class TicTacToeHub : Hub
             .Select(g => new {
                 gameId = g.GameId,
                 friendlyName = g.FriendlyName,
-                hostPlayer = g.HostPlayer  
+                hostPlayer = g.HostPlayer,
+                guestPlayer = g.GuestPlayer,
+                status = g.State.Status.ToString()
             })
             .ToArray();
 

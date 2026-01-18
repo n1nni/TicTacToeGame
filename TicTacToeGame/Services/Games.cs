@@ -187,10 +187,11 @@ public sealed class Games : IGames
     public IReadOnlyCollection<Game> GetAll() => _gamesById.Values.ToArray();
 
     public IReadOnlyCollection<Game> GetWaitingForOpponent() =>
-        _gamesById.Values
-            .Where(g => g.State.Status == GameStatus.WaitingForOpponent)
-            .OrderBy(g => g.FriendlyName)
-            .ToArray();
+    _gamesById.Values
+        .Where(g => g.State.Status == GameStatus.WaitingForOpponent ||
+                    g.State.Status == GameStatus.InProgress)
+        .OrderBy(g => g.FriendlyName)
+        .ToArray();
 
     public Result<Game> CancelGame(string gameId, string player)
     {
