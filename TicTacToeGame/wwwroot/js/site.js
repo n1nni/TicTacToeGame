@@ -211,6 +211,10 @@
             document.querySelectorAll('.js-join-game').forEach(function (btn) {
                 btn.disabled = !hasName;
             });
+
+            document.querySelectorAll('.js-cancel-game').forEach(function (btn) {
+                btn.disabled = !hasName;
+            });
         }
     };
 
@@ -223,6 +227,7 @@
             if (!container) return;
 
             var hasName = !!Storage.getDisplayName();
+            var currentPlayer = Storage.getDisplayName();
 
             if (!games || games.length === 0) {
                 container.innerHTML = '<p class="text-muted">No games available.</p>';
@@ -231,16 +236,27 @@
 
             var html = '<div class="list-group">';
             games.forEach(function (g) {
+                var isCreator = g.hostPlayer === currentPlayer;
+
                 html += '<div class="list-group-item d-flex justify-content-between align-items-center">'
                     + '<div>'
                     + '<div class="fw-semibold"></div>'
-                    + '<small class="text-muted"></small>'
+                    + '<small class="text-muted game-id"></small>'
+                    + (isCreator ? '<small class="text-success d-block">You created this game</small>' : '')
                     + '</div>'
-                    + '<div>'
-                    + '<button type="button" class="btn btn-sm btn-outline-primary js-join-game" '
-                    + 'data-game-id="" ' + (hasName ? '' : 'disabled') + '>Join</button>'
-                    + '</div>'
-                    + '</div>';
+                    + '<div class="btn-group">';
+
+                if (isCreator) {
+                    html += '<button type="button" class="btn btn-sm btn-outline-success js-rejoin-game" '
+                        + 'data-game-id="" ' + (hasName ? '' : 'disabled') + '>Rejoin</button>'
+                        + '<button type="button" class="btn btn-sm btn-outline-danger js-cancel-game" '
+                        + 'data-game-id="" ' + (hasName ? '' : 'disabled') + '>Cancel</button>';
+                } else {
+                    html += '<button type="button" class="btn btn-sm btn-outline-primary js-join-game" '
+                        + 'data-game-id="" ' + (hasName ? '' : 'disabled') + '>Join</button>';
+                }
+
+                html += '</div></div>';
             });
             html += '</div>';
 
@@ -251,8 +267,15 @@
             items.forEach(function (item, idx) {
                 var g = games[idx];
                 item.querySelector('.fw-semibold').textContent = g.friendlyName;
-                item.querySelector('small').textContent = 'Id: ' + g.gameId;
-                item.querySelector('button').setAttribute('data-game-id', g.gameId);
+                item.querySelector('.game-id').textContent = 'Id: ' + g.gameId;
+
+                var joinBtn = item.querySelector('.js-join-game');
+                var rejoinBtn = item.querySelector('.js-rejoin-game');
+                var cancelBtn = item.querySelector('.js-cancel-game');
+
+                if (joinBtn) joinBtn.setAttribute('data-game-id', g.gameId);
+                if (rejoinBtn) rejoinBtn.setAttribute('data-game-id', g.gameId);
+                if (cancelBtn) cancelBtn.setAttribute('data-game-id', g.gameId);
             });
         },
 
@@ -263,7 +286,6 @@
             if (!container && !createForm) return;
 
             // Register event handlers BEFORE ensuring connection
-            // This way they will be re-registered if connection is reset
             Hub.on('LobbyUpdated', function (payload) {
                 LobbyModule.renderWaitingGames(payload.waitingGames);
                 DisplayNameModule.refreshUI();
@@ -277,6 +299,20 @@
                 window.location.href = '/Game/' + payload.gameId;
             });
 
+            Hub.on('GameCancelled', function (payload) {
+                var successEl = document.getElementById('joinGameSuccess');
+                if (successEl) {
+                    successEl.textContent = 'Game cancelled successfully.';
+                    successEl.classList.remove('alert-danger');
+                    successEl.classList.add('alert-success');
+                    successEl.hidden = false;
+
+                    setTimeout(function () {
+                        successEl.hidden = true;
+                    }, 3000);
+                }
+            });
+
             try {
                 await Hub.ensureConnection();
 
@@ -288,8 +324,8 @@
                     createForm.addEventListener('submit', this.handleCreateGame.bind(this));
                 }
 
-                // Join game buttons (event delegation)
-                document.addEventListener('click', this.handleJoinGame.bind(this));
+                // Event delegation for join, rejoin, and cancel buttons
+                document.addEventListener('click', this.handleGameActions.bind(this));
 
             } catch {
                 // ignore connection errors
@@ -318,20 +354,47 @@
             }
         },
 
-        handleJoinGame: async function (e) {
+        handleGameActions: async function (e) {
             var target = e.target;
-            if (!target || !target.classList || !target.classList.contains('js-join-game')) return;
+            if (!target || !target.classList) return;
 
             var gameId = target.getAttribute('data-game-id');
             if (!gameId) return;
 
-            try {
-                await Hub.invoke('JoinGame', gameId);
-            } catch (err) {
-                var errorEl = document.getElementById('joinGameSuccess');
-                if (errorEl) {
-                    errorEl.textContent = err && err.message ? err.message : 'Failed to join game.';
-                    errorEl.hidden = false;
+            // Handle Join Game
+            if (target.classList.contains('js-join-game')) {
+                try {
+                    await Hub.invoke('JoinGame', gameId);
+                } catch (err) {
+                    var errorEl = document.getElementById('joinGameSuccess');
+                    if (errorEl) {
+                        errorEl.textContent = err && err.message ? err.message : 'Failed to join game.';
+                        errorEl.classList.remove('alert-success');
+                        errorEl.classList.add('alert-danger');
+                        errorEl.hidden = false;
+                    }
+                }
+            }
+
+            // Handle Rejoin Game
+            if (target.classList.contains('js-rejoin-game')) {
+                window.location.href = '/Game/' + gameId;
+            }
+
+            // Handle Cancel Game
+            if (target.classList.contains('js-cancel-game')) {
+                if (!confirm('Are you sure you want to cancel this game?')) return;
+
+                try {
+                    await Hub.invoke('CancelGame', gameId);
+                } catch (err) {
+                    var errorEl = document.getElementById('joinGameSuccess');
+                    if (errorEl) {
+                        errorEl.textContent = err && err.message ? err.message : 'Failed to cancel game.';
+                        errorEl.classList.remove('alert-success');
+                        errorEl.classList.add('alert-danger');
+                        errorEl.hidden = false;
+                    }
                 }
             }
         }
@@ -343,6 +406,7 @@
     var GameModule = {
         state: null,
         cellButtons: null,
+        redirectTimeout: null,
 
         init: async function () {
             if (!window.ticTacToeGame || !document.getElementById('board')) return;
@@ -408,6 +472,11 @@
                 this.state.status === 'InProgress' &&
                 this.state.nextTurnPlayerId === this.state.playerId
             );
+
+            // Auto-redirect after game ends
+            if (this.state.status === 'Finished' && !this.redirectTimeout) {
+                this.scheduleRedirect();
+            }
         },
 
         handleCellClick: async function (e) {
@@ -443,7 +512,7 @@
             this.cellButtons.forEach(function (btn) {
                 var idx = parseInt(btn.getAttribute('data-cell-index'), 10);
                 var value = board[idx];
-                
+
                 if (value === 'X') {
                     btn.textContent = 'X';
                     btn.classList.remove('text-danger');
@@ -477,14 +546,14 @@
             if (state.status === 'Finished') {
                 if (state.winnerPlayerId) {
                     if (state.winnerPlayerId === state.playerId) {
-                        UI.setAlertText('gameStatus', 'You won!');
+                        UI.setAlertText('gameStatus', 'You won! Redirecting to lobby in 10 seconds...');
                         if (statusEl) statusEl.classList.add('alert-success');
                     } else {
-                        UI.setAlertText('gameStatus', 'You lost.');
+                        UI.setAlertText('gameStatus', 'You lost. Redirecting to lobby in 10 seconds...');
                         if (statusEl) statusEl.classList.add('alert-danger');
                     }
                 } else {
-                    UI.setAlertText('gameStatus', 'Draw.');
+                    UI.setAlertText('gameStatus', 'Draw. Redirecting to lobby in 10 seconds...');
                     if (statusEl) statusEl.classList.add('alert-info');
                 }
                 return;
@@ -496,6 +565,13 @@
                 UI.setAlertText('gameStatus', "Opponent's turn.");
             }
             if (statusEl) statusEl.classList.add('alert-info');
+        },
+
+        scheduleRedirect: function () {
+            var self = this;
+            this.redirectTimeout = setTimeout(function () {
+                window.location.href = '/';
+            }, 10000); // 10 seconds
         }
     };
 

@@ -106,6 +106,18 @@ public sealed class TicTacToeHub : Hub
         await BroadcastGameAsync(gameId);
     }
 
+    public async Task CancelGame(string gameId)
+    {
+        var displayName = GetDisplayNameOrThrow();
+
+        var result = _games.CancelGame(gameId, displayName);
+        if (result.IsFailure)
+            throw new HubException(result.Error);
+
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, GetGameGroup(gameId));
+        await Clients.Caller.SendAsync("GameCancelled", new { gameId });
+        await BroadcastLobbyAsync();
+    }
     private string GetDisplayNameOrThrow()
     {
         if (Context.Items.TryGetValue(DisplayNameItemKey, out var v) && v is string s && !string.IsNullOrWhiteSpace(s))
@@ -117,7 +129,11 @@ public sealed class TicTacToeHub : Hub
     private Task BroadcastLobbyAsync()
     {
         var waiting = _games.GetWaitingForOpponent()
-            .Select(g => new { gameId = g.GameId, friendlyName = g.FriendlyName })
+            .Select(g => new {
+                gameId = g.GameId,
+                friendlyName = g.FriendlyName,
+                hostPlayer = g.HostPlayer  
+            })
             .ToArray();
 
         return Clients.All.SendAsync("LobbyUpdated", new { waitingGames = waiting });
@@ -141,6 +157,5 @@ public sealed class TicTacToeHub : Hub
 
         return Clients.Group(GetGameGroup(gameId)).SendAsync("GameUpdated", payload);
     }
-
     private static string GetGameGroup(string gameId) => $"game:{gameId}";
 }

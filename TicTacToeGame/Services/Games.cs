@@ -116,14 +116,25 @@ public sealed class Games : IGames
             var mark = isHost ? Cell.X : Cell.O;
             board[cellIndex] = mark;
 
-            // Check for winner or draw
-            var isDraw =  board.All(c => c != Cell.Empty);
+            // Check for winner
+            var winner = CheckWinner(board);
+            var hasWinner = winner != Cell.Empty;
+
+            // Check for draw (all cells filled and no winner)
+            var isDraw = !hasWinner && board.All(c => c != Cell.Empty);
 
             // Determine new state
             var status = GameStatus.InProgress;
             string? nextTurn = isHost ? game.GuestPlayer : game.HostPlayer;
+            string? winnerPlayer = null;
 
-            if (isDraw)
+            if (hasWinner)
+            {
+                status = GameStatus.Finished;
+                nextTurn = null;
+                winnerPlayer = winner == Cell.X ? game.HostPlayer : game.GuestPlayer;
+            }
+            else if (isDraw)
             {
                 status = GameStatus.Finished;
                 nextTurn = null;
@@ -135,12 +146,42 @@ public sealed class Games : IGames
                     Board: board,
                     NextTurnPlayer: nextTurn,
                     Status: status,
-                    WinnerPlayer: null)
+                    WinnerPlayer: winnerPlayer)
             };
 
             _gamesById[gameId] = updated;
             return updated;
         }
+    }
+
+    private static Cell CheckWinner(Cell[] board)
+    {
+        // Define all winning combinations
+        int[][] winPatterns = new[]
+        {
+        new[] { 0, 1, 2 }, 
+        new[] { 3, 4, 5 }, 
+        new[] { 6, 7, 8 }, 
+        new[] { 0, 3, 6 }, 
+        new[] { 1, 4, 7 }, 
+        new[] { 2, 5, 8 }, 
+        new[] { 0, 4, 8 }, 
+        new[] { 2, 4, 6 }  
+    };
+
+        foreach (var pattern in winPatterns)
+        {
+            var first = board[pattern[0]];
+
+            if (first != Cell.Empty &&
+                first == board[pattern[1]] &&
+                first == board[pattern[2]])
+            {
+                return first;
+            }
+        }
+
+        return Cell.Empty;
     }
 
     public IReadOnlyCollection<Game> GetAll() => _gamesById.Values.ToArray();
@@ -151,4 +192,27 @@ public sealed class Games : IGames
             .OrderBy(g => g.FriendlyName)
             .ToArray();
 
+    public Result<Game> CancelGame(string gameId, string player)
+    {
+        if (string.IsNullOrWhiteSpace(gameId))
+            return "Game id is required.";
+
+        if (string.IsNullOrWhiteSpace(player))
+            return "Player is required.";
+
+        lock (_lock)
+        {
+            if (!_gamesById.TryGetValue(gameId, out var game))
+                return "Game not found.";
+
+            if (game.HostPlayer != player)
+                return "Only the host can cancel the game.";
+
+            if (game.State.Status != GameStatus.WaitingForOpponent)
+                return "Can only cancel games that haven't started yet.";
+
+            _gamesById.TryRemove(gameId, out _);
+            return game;
+        }
+    }
 }
